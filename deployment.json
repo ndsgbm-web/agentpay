@@ -1,0 +1,17 @@
+{
+  "network": "base-sepolia",
+  "chain_id": 84532,
+  "deployer": "0x06D60feC442437e4113Ee1a465d09d7c33c6EeB9",
+  "rpc": "https://base-sepolia-rpc.publicnode.com",
+  "explorer": "https://sepolia.basescan.org",
+  "contracts": {
+    "usdc":   "0x836c5bB361fea411424fF155a08DBa1d4ffE319C",
+    "aave":   "0xc743d50550340fc0Dd80B1De99E2a8224E7E9443",
+    "escrow": "0xc69505668aadf13d3714bC9884930ce8452ddAf5",
+    "vault":  "0xB8305f721c95171564544e7a908e60C49F26a63D"
+  },
+  "fee_recipient":  "0x27fe5055144366ec371e0231aa2d7b5f6042b839",
+  "yield_recipient":"0x27fe5055144366ec371e0231aa2d7b5f6042b839",
+  "fee_bps": 50,
+  "deployed_at": "2026-06-23T15:55:00Z"
+}

@@ -123,7 +123,17 @@ def main():
 
     usdc_addr = Web3.to_checksum_address(args.usdc or net["usdc"])
 
-    print("\n[1/4] deploying AgentPayEscrow...")
+    if args.mode == "mock":
+        print("\n[0/4] deploying MockUSDC (open mint for testnet)...")
+        mock_usdc_abi_path = CONTRACTS / "MockUSDC.abi.json"
+        mock_usdc_bin_path = BUILD / "MockUSDC.bin"
+        if not (mock_usdc_abi_path.exists() and mock_usdc_bin_path.exists()):
+            sys.exit("MockUSDC build artifacts missing; compile contracts/MockUSDC.sol first")
+        mock_usdc_abi, mock_usdc_bin = load_contract(mock_usdc_abi_path, mock_usdc_bin_path)
+        usdc_addr = deploy(w3, acct, mock_usdc_abi, mock_usdc_bin)
+        print(f"  usdc (mock): {usdc_addr}")
+
+    print("\n[2/4] deploying AgentPayEscrow...")
     escrow_abi, escrow_bin = load_contract(
         CONTRACTS / "AgentPayEscrow.abi.json",
         BUILD / "AgentPayEscrow.bin",
@@ -134,7 +144,7 @@ def main():
     print(f"  explorer: {net['explorer']}/address/{escrow_addr}")
 
     if args.mode == "mock":
-        print("\n[2/4] deploying MockAave...")
+        print("\n[3/4] deploying MockAave...")
         mock_abi_path = next(MOCKS.glob("MockAave.abi.json"), None)
         mock_bin_path = next(MOCKS.glob("MockAave.bin"), None)
         if not (mock_abi_path and mock_bin_path):
@@ -148,7 +158,7 @@ def main():
         aave_addr = Web3.to_checksum_address(aave_addr)
     print(f"  aave:     {aave_addr}")
 
-    print("\n[3/4] deploying AgentPayVault...")
+    print("\n[4/4] deploying AgentPayVault...")
     vault_abi, vault_bin = load_contract(
         CONTRACTS / "AgentPayVault.abi.json",
         BUILD / "AgentPayVault.bin",
@@ -157,7 +167,7 @@ def main():
                         Web3.to_checksum_address(args.yield_recipient))
     print(f"  vault:    {vault_addr}")
 
-    print("\n[4/4] linking contracts...")
+    print("\n[5/4] linking contracts...")
     if args.mode == "mock":
         aave = w3.eth.contract(address=aave_addr, abi=mock_abi)
         send(w3, acct, aave.functions.setVault(vault_addr))
