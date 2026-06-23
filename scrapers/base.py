@@ -20,6 +20,7 @@ class ScrapedTask:
     deadline_hours: int = 168    # default 1 week
     url: str = ""                # link back to source
     raw: dict = field(default_factory=dict)
+    required_stake: float = 0.0
 
     def to_task_post(self) -> dict:
         d = asdict(self)

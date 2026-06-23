@@ -3,23 +3,28 @@
 Each scraper implements:
     class Scraper:
         name: str
-        def fetch(self) -> Iterable[ScrapedTask]: ...
+        def fetch() -> Iterable[ScrapedTask]: ...
 
 A ScrapedTask is normalized so the API can serve it via /tasks.
 """
 from .base import Scraper, ScrapedTask
 from .runx import RunxScraper
 from .algora import AlgoraScraper
+from .github import GitHubBountyScraper
 from .polar import PolarScraper
 from .reddit import RedditScraper
 from .fiverr import FiverrScraper
 
 SCRAPERS = {
-    "runx":   RunxScraper,
-    "algora": AlgoraScraper,
-    "polar":  PolarScraper,
-    "reddit": RedditScraper,
-    "fiverr": FiverrScraper,
+    "runx":          RunxScraper,
+    "algora":        AlgoraScraper,
+    "github-bounty": GitHubBountyScraper,
+    "polar":         PolarScraper,            # currently disabled (api private)
+    "reddit":        RedditScraper,           # currently disabled (ip-blocked)
+    "fiverr":        FiverrScraper,           # disabled (commercial)
 }
 
-__all__ = ["Scraper", "ScrapedTask", "SCRAPERS"]
+# Default-enable only the ones that actually return tasks right now.
+DEFAULT_ENABLED = ("runx", "algora", "github-bounty")
+
+__all__ = ["Scraper", "ScrapedTask", "SCRAPERS", "DEFAULT_ENABLED"]

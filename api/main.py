@@ -99,6 +99,7 @@ class ScrapedTaskIngest(BaseModel):
     buyer_address: str = ""
     deadline_hours: int = 168
     url: str = ""
+    required_stake: float = 0.0
 
 
 class VaultEvent(BaseModel):
@@ -198,21 +199,49 @@ async def create_task(req: TaskCreate):
     return task
 
 
+def _agent_locked_stake(address: str) -> float:
+    """Sum of USDC the agent has currently staked/locked in the vault."""
+    events = DATA_DIR / "vault_events.jsonl"
+    if not events.exists():
+        return 0.0
+    locked = 0.0
+    for line in events.open():
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("agent", "").lower() != address.lower():
+            continue
+        if e.get("kind") == "stake_locked" and e.get("amount") is not None:
+            locked += e["amount"] / 1_000_000
+        elif e.get("kind") == "stake_released" and e.get("amount") is not None:
+            locked -= e["amount"] / 1_000_000
+        elif e.get("kind") == "stake_slashed" and e.get("amount") is not None:
+            locked -= e["amount"] / 1_000_000
+    return max(0.0, locked)
+
+
 @app.post("/tasks/ingest")
 async def ingest_scraped(req: ScrapedTaskIngest):
     """Scraper pushes a batch of tasks into the pool."""
     if req.budget_usdc <= 0:
         raise HTTPException(400, "budget_usdc must be > 0")
-    # dedupe by (source, external_id)
+    # dedupe by (source, external_id); also collapse empty external_ids by title+url
     tasks = _load_json(TASKS_FILE, [])
     for t in tasks:
-        if t.get("source") == req.source and t.get("external_id") == req.external_id and t.get("status") == "open":
+        if t.get("status") != "open":
+            continue
+        same_source = t.get("source") == req.source
+        same_id = req.external_id and t.get("external_id") == req.external_id
+        same_title = t.get("title") == req.title and t.get("url") == req.url
+        if same_source and (same_id or (same_title and not req.external_id)):
             return {"ok": True, "id": t["id"], "duplicate": True}
     task = Task(
         title=req.title, description=req.description,
         category=req.category, budget_usdc=req.budget_usdc,
         deadline_hours=req.deadline_hours, buyer_address=req.buyer_address,
         source=req.source, external_id=req.external_id, url=req.url,
+        required_stake=req.required_stake,
     )
     tasks.append(task.model_dump())
     _save_json(TASKS_FILE, tasks)
@@ -238,11 +267,52 @@ async def claim_task(task_id: str, req: ClaimRequest):
         if t["id"] == task_id:
             if t["status"] != "open":
                 raise HTTPException(409, f"task is {t['status']}")
+            # Stake gate: if the task has required_stake > 0, the agent
+            # must already have that much USDC locked in the vault.
+            stake_needed = float(t.get("required_stake", 0) or 0)
+            if stake_needed > 0:
+                have = _agent_locked_stake(req.seller_address)
+                if have < stake_needed:
+                    raise HTTPException(
+                        402,
+                        f"deposit required: stake {stake_needed} USDC in vault (have {have});"
+                        f" call vault.lockStake() on-chain or POST /agents/{req.seller_address}/stake",
+                    )
             t["status"] = "claimed"
             t["claimed_by"] = req.seller_address
             _save_json(TASKS_FILE, tasks)
             return t
     raise HTTPException(404, "task not found")
+
+
+class StakeRequest(BaseModel):
+    amount_usdc: float
+    task_id: str = ""
+    tx_hash: str = ""
+
+
+@app.post("/agents/{address}/stake")
+async def deposit_stake(address: str, req: StakeRequest):
+    """Off-chain bookkeeping for an agent's vault stake. The actual
+    USDC transfer happens on-chain (vault.lockStake); this endpoint
+    just lets the API know the agent has skin in the game so it can
+    clear the claim gate.
+    """
+    amount_usdc = req.amount_usdc
+    task_id = req.task_id
+    if amount_usdc <= 0:
+        raise HTTPException(400, "amount_usdc must be > 0")
+    evt = VaultEvent(
+        kind="stake_locked",
+        agent=address,
+        amount=int(round(amount_usdc * 1_000_000)),
+        tx_hash=req.tx_hash or "",
+        extra={"task_id": task_id} if task_id else {},
+    )
+    events_file = DATA_DIR / "vault_events.jsonl"
+    with events_file.open("a") as f:
+        f.write(json.dumps(evt.model_dump()) + chr(10))
+    return {"ok": True, "locked_usdc": amount_usdc, "agent": address}
 
 
 @app.post("/tasks/{task_id}/submit")
@@ -332,6 +402,7 @@ async def agent_profile(address: str):
 
     deposits = 0.0
     withdrawals = 0.0
+    staked = 0.0
     slashed = 0
     released_to = 0.0
     paid_out = 0.0
@@ -342,14 +413,22 @@ async def agent_profile(address: str):
                 e = json.loads(line)
                 if e.get("agent", "").lower() != address.lower():
                     continue
-                if e["kind"] == "deposit" and e.get("amount"):
-                    deposits += e["amount"] / 1_000_000
-                elif e["kind"] == "withdraw" and e.get("amount"):
-                    withdrawals += e["amount"] / 1_000_000
-                elif e["kind"] == "stake_slashed" and e.get("amount"):
+                amt = (e.get("amount") or 0) / 1_000_000
+                kind = e.get("kind")
+                if kind == "deposit" and amt:
+                    deposits += amt
+                elif kind == "withdraw" and amt:
+                    withdrawals += amt
+                elif kind == "stake_locked" and amt:
+                    staked += amt
+                elif kind == "stake_released" and amt:
+                    staked -= amt
+                elif kind == "stake_slashed" and amt:
+                    staked -= amt
                     slashed += 1
             except Exception:
                 continue
+    staked = max(0.0, staked)
 
     tasks = _load_json(TASKS_FILE, [])
     completed = sum(1 for t in tasks if t.get("claimed_by", "").lower() == address.lower() and t.get("status") == "settled")
@@ -359,6 +438,7 @@ async def agent_profile(address: str):
         "address": address,
         "deposited_usdc": round(deposits, 4),
         "withdrawn_usdc": round(withdrawals, 4),
+        "staked_usdc": round(staked, 4),
         "tasks_completed": completed,
         "tasks_failed": failed,
         "stake_slashed_count": slashed,

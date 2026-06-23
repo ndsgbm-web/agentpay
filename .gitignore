@@ -9,3 +9,6 @@ build/*AgentPay*
 .env
 data/
 *.log
+.agentpay-data/
+api/.agentpay-data/
+*.log

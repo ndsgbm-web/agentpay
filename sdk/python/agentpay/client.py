@@ -235,6 +235,7 @@ class AgentPay:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         aave_pool: Optional[str] = None,
+        address: Optional[str] = None,
     ):
         self.chain_id = chain_id
         self.api_url = (api_url or os.environ.get("AGENTPAY_API") or self.DEFAULT_API).rstrip("/")
@@ -267,12 +268,17 @@ class AgentPay:
             if escrow_address:
                 self.escrow_address = Web3.to_checksum_address(escrow_address)
                 self.escrow = self.w3.eth.contract(address=self.escrow_address, abi=ESCROW_ABI)
+        elif address is not None:
+            # read-only / off-chain client (no signing capability)
+            self._readonly_address = Web3.to_checksum_address(address) if hasattr(Web3, "to_checksum_address") else address
 
     # ---------- helpers ----------
 
     @property
     def address(self) -> Optional[str]:
-        return self.account.address if self.account else None
+        if self.account is not None:
+            return self.account.address
+        return getattr(self, "_readonly_address", None)
 
     @staticmethod
     def hash_task(task: str) -> bytes:
@@ -457,6 +463,23 @@ class AgentPay:
             raise RuntimeError("claim requires a wallet")
         return Task.from_dict(self._http("POST", f"/tasks/{task_id}/claim",
                                         {"seller_address": self.address}))
+
+    def claim_with_deposit(self, task_id: str) -> Task:
+        """One-shot claim: lock the required deposit (off-chain bookkeeping)
+        then claim. On a real chain you would also broadcast vault.lockStake
+        here; this implementation uses the API's bookkeeping endpoint
+        so the gate clears.
+        """
+        if not self.address:
+            raise RuntimeError("claim requires a wallet")
+        task = self.get_task(task_id)
+        stake = float(task.required_stake or 0.0)
+        if stake > 0:
+            self._http("POST", f"/agents/{self.address}/stake", {
+                "amount_usdc": stake,
+                "task_id": task_id,
+            })
+        return self.claim(task_id)
 
     def submit(self, task_id: str, proof: str) -> Task:
         """Submit your work for review. Buyer then releases or slashes."""
