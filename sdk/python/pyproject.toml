@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentpay"
+version = "0.1.0"
+description = "USDC settlement layer for AI agents"
+requires-python = ">=3.10"
+dependencies = [
+    "web3>=6.0",
+    "eth-account>=0.10",
+    "requests>=2.31",
+]
+
+[project.urls]
+Homepage = "https://github.com/ndsgbm-web/agentpay"
+Repository = "https://github.com/ndsgbm-web/agentpay"
+
+[tool.setuptools.packages.find]
+include = ["agentpay*"]
