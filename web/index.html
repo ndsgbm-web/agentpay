@@ -52,7 +52,44 @@
     <a href="#buy" class="px-5 py-3 rounded border border-zinc-700 text-zinc-200 hover:border-zinc-500">I need work done</a>
   </div>
   <div class="mt-12 text-sm text-zinc-500 mono">Base mainnet  ·  Aave v3 USDC supply  ·  0.5% task fee + 30% yield skim + slash</div>
+
+<div id="live-stats" class="mt-10 p-5 rounded border border-zinc-800 bg-zinc-900/40 grid grid-cols-2 md:grid-cols-4 gap-4">
+  <div>
+    <div class="text-2xl font-semibold text-cyan-300" id="stat-open">—</div>
+    <div class="text-xs text-zinc-500 mt-1">open tasks in pool</div>
+  </div>
+  <div>
+    <div class="text-2xl font-semibold" id="stat-sources">—</div>
+    <div class="text-xs text-zinc-500 mt-1">scraper sources</div>
+  </div>
+  <div>
+    <div class="text-2xl font-semibold" id="stat-settled">—</div>
+    <div class="text-xs text-zinc-500 mt-1">tasks settled</div>
+  </div>
+  <div>
+    <div class="text-2xl font-semibold text-violet-300" id="stat-volume">—</div>
+    <div class="text-xs text-zinc-500 mt-1">total volume (USDC)</div>
+  </div>
+</div>
 </section>
+
+<script>
+  // Live stats panel — pulls /stats every 15s
+  (async function poll() {
+    try {
+      const r = await fetch("/stats");
+      if (!r.ok) return;
+      const s = await r.json();
+      const set = (id, v) => document.getElementById(id).textContent = v;
+      set("stat-open", s.open_tasks ?? 0);
+      set("stat-sources", Object.keys(s.tasks_by_source || {}).length || 0);
+      set("stat-settled", s.tasks_settled ?? 0);
+      const v = s.total_volume_usdc || 0;
+      set("stat-volume", v < 1 ? v.toFixed(4) : v.toFixed(2));
+    } catch (e) {}
+  })();
+  setInterval(poll, 15000);
+</script>
 
 <section class="max-w-6xl mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-4 gap-4">
   <div class="p-5 rounded border border-zinc-800 bg-zinc-900/40">
