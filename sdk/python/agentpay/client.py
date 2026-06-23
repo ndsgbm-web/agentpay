@@ -1,14 +1,10 @@
-"""AgentPay client — USDC collateral pool + task market for AI agents.
-
-Three layers:
-  1. On-chain vault: deposit USDC, earn Aave v3 supply APY
-  2. On-chain escrow: per-task USDC lock (0.5% fee)
-  3. Off-chain task board: scraped + posted tasks, served via REST
-
-The SDK is intentionally small: web3.py is the only on-chain dep, and
-stdlib urllib handles the API.
-"""
+"""AgentPay client — USDC collateral pool + task market for AI agents."""
 from __future__ import annotations
+
+try:
+    from web3 import Web3
+except ImportError:
+    Web3 = None
 
 import hashlib
 import json
@@ -242,7 +238,6 @@ class AgentPay:
 
         if private_key is not None:
             try:
-                from web3 import Web3
                 from eth_account import Account
             except ImportError as e:
                 raise ImportError("agentpay requires web3.py: pip install 'web3>=6.0' eth-account") from e
@@ -281,6 +276,12 @@ class AgentPay:
         return units / 1_000_000
 
     def usdc(self) -> str:
+        # If a USDC contract was bound via __init__ (e.g. mock tests), use that.
+        if self._usdc is not None:
+            try:
+                return self._usdc.address
+            except AttributeError:
+                pass
         return USDC_ADDRESSES[self.chain_id]
 
     # ---------- low-level tx ----------
@@ -314,6 +315,49 @@ class AgentPay:
         r = self._send(self.vault.functions.deposit(amount))
         return r.transactionHash
 
+    def create_and_fund(self, payee: str, amount_usdc: float, task_hash: bytes, deadline_hours: int = 24) -> bytes:
+        """Create an escrow and fund it in one tx. Returns the escrow id (bytes32)."""
+        if not self.escrow:
+            raise RuntimeError("no escrow address configured")
+        amount = self.to_usdc(amount_usdc)
+        # 1. approve escrow to pull USDC
+        self._send(self._usdc.functions.approve(self.escrow_address, amount))
+        # 2. createAndFund
+        deadline = int(time.time()) + deadline_hours * 3600
+        r = self._send(self.escrow.functions.createAndFund(
+            Web3.to_checksum_address(payee) if hasattr(Web3, "to_checksum_address") else payee,
+            Web3.to_checksum_address(self.usdc()) if hasattr(Web3, "to_checksum_address") else self.usdc(),
+            amount, task_hash, deadline,
+        ))
+        # web3.py event processing
+        try:
+            events = self.escrow.events.EscrowCreated().process_receipt(r)
+            if events:
+                return events[0]["args"]["id"]
+        except Exception:
+            pass
+        # fallback: find the log whose address matches the escrow contract
+        for log in r.logs:
+            if log["address"].lower() == self.escrow_address.lower():
+                return log["topics"][1]
+        raise RuntimeError("could not find EscrowCreated event in receipt")
+
+    def release(self, escrow_id) -> bytes:
+        """Release escrow to payee. Fee is deducted automatically."""
+        if not self.escrow:
+            raise RuntimeError("no escrow address configured")
+        eid = escrow_id if isinstance(escrow_id, bytes) else bytes.fromhex(escrow_id.replace("0x", ""))
+        r = self._send(self.escrow.functions.release(eid))
+        return r.transactionHash
+
+    def refund(self, escrow_id) -> bytes:
+        """Refund the payer. Only callable after deadline."""
+        if not self.escrow:
+            raise RuntimeError("no escrow address configured")
+        eid = escrow_id if isinstance(escrow_id, bytes) else bytes.fromhex(escrow_id.replace("0x", ""))
+        r = self._send(self.escrow.functions.refund(eid))
+        return r.transactionHash
+
     def withdraw(self, usdc: float) -> bytes:
         """Withdraw USDC from the vault. Burns your share of aTokens."""
         amount = self.to_usdc(usdc)
@@ -327,6 +371,13 @@ class AgentPay:
         raw = self.vault.functions.aTokenBalanceOf(self.address).call()
         return self.from_usdc(raw)
 
+    def claim_yield(self) -> bytes:
+        """Anyone can call skimYield; 30% goes to yieldRecipient, 70% stays for depositors."""
+        if not self.vault:
+            raise RuntimeError("no vault address configured")
+        r = self._send(self.vault.functions.skimYield())
+        return r.transactionHash
+
     def locked_stake(self) -> float:
         if not self.vault:
             return 0.0
@@ -337,9 +388,9 @@ class AgentPay:
         """Aave v3 USDC supply APY on Base, fetched from Aave's public rate API."""
         try:
             from urllib.request import urlopen
-            import json
+            import json as _json
             with urlopen("https://aave-api-v2.aave.com/data/rates-history", timeout=10) as r:
-                data = json.loads(r.read())
+                data = _json.loads(r.read())
             for reserve in data:
                 if reserve.get("reserve", {}).get("symbol") == "USDC" and reserve.get("reserve", {}).get("network", "").lower() == "base":
                     return float(reserve.get("currentLiquidityRate", 0)) / 1e25

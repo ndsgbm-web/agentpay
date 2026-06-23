@@ -71,7 +71,9 @@ def main():
 
     # ----- escrow -----
     banner("Deploying AgentPayEscrow")
-    escrow_abi = json.loads(Path(ROOT / "contracts/AgentPayEscrow.abi.json").read_text())
+    escrow_data = json.loads(Path(ROOT / "contracts/AgentPayEscrow.abi.json").read_text())
+    escrow_abi = escrow_data["abi"]
+    escrow_bin = escrow_data["bytecode"]
     escrow_bin = next(ROOT.glob("build/*AgentPayEscrow*.bin")).read_text().strip()
     escrow_addr = deploy(deployer, escrow_abi, escrow_bin, fee_acct.address, 50)
     escrow = w3.eth.contract(address=escrow_addr, abi=escrow_abi)
