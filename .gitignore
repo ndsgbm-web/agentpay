@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/*.bin
+build/*.abi
+build/*MockAave*
+build/*MockUSDC*
+build/*AgentPay*
+.DS_Store
+.env
+data/
+*.log
