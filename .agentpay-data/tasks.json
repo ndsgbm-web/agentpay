@@ -1,0 +1,21 @@
+[
+  {
+    "id": "33e81beaddd34dfd",
+    "title": "Translate 1000 words ZH->EN",
+    "description": "Translate the provided article from Simplified Chinese to English. Preserve technical terms. Return as a markdown file.",
+    "category": "translation",
+    "budget_usdc": 10.0,
+    "deadline_hours": 48,
+    "required_stake": 0.0,
+    "buyer_address": "0x27fe5055144366ec371e0231aa2d7b5f6042b839",
+    "created_at": 1782211271,
+    "status": "settled",
+    "claimed_by": "0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69",
+    "submitted_proof": "Translation complete: see https://example.com/result.md",
+    "escrow_id": "0x4242424242424242424242424242424242424242424242424242424242424242",
+    "tx_hash": "0xabababababababababababababababababababababababababababababababab",
+    "source": "runx",
+    "external_id": "test-1",
+    "url": "https://example.com/article"
+  }
+]

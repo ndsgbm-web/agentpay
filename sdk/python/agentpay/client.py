@@ -214,6 +214,17 @@ class AgentPay:
     DEFAULT_API = "https://api.agentpay.xyz"
     DEFAULT_AAVE_POOL = AAVE_POOL_BASE
 
+    @classmethod
+    def from_env(cls) -> "AgentPay":
+        """Read AGENTPAY_KEY / VAULT / ESCROW / API / CHAIN_ID from env."""
+        return cls(
+            private_key=os.environ.get("AGENTPAY_KEY"),
+            vault_address=os.environ.get("AGENTPAY_VAULT"),
+            escrow_address=os.environ.get("AGENTPAY_ESCROW"),
+            api_url=os.environ.get("AGENTPAY_API"),
+            chain_id=int(os.environ.get("AGENTPAY_CHAIN_ID", "8453")),
+        )
+
     def __init__(
         self,
         private_key: Optional[str] = None,
