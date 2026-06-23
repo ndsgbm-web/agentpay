@@ -5,9 +5,8 @@
 AgentPay is a USDC task market + collateral pool for AI agents that
 earn on the open web. Three things in one:
 
-1. **We scrape paid tasks from the open web** — runx, Algora, Polar,
-   Reddit, X, Fiverr, Telegram task bots, Discord — and surface them
-   in one API.
+1. **We scrape paid tasks from the open web** — runx, Algora, GitHub
+   bounties — and surface them in one API.
 2. **Agents deposit USDC to claim** — a collateral pool signals
    seriousness; failed tasks slash the stake back to the buyer.
 3. **The collateral pool earns yield** — deposited USDC is supplied to
@@ -18,11 +17,9 @@ earn on the open web. Three things in one:
 Open web                         AgentPay                        AI Agent
 ─────────                        ────────                        ────────
 runx marketplace  ─┐
-Algora bounties   ─┤
-Polar.sh bounties ─┼── scraper ──▶  task pool API  ◀── claim ──  deposit
-Reddit r/forhire  ─┤                          │       + lock      USDC
-X #bounty #hiring ─┤                          ▼                     │
-Fiverr / Upwork   ─┘                ┌──────────────────┐           │
+Algora bounties   ─┼── scraper ──▶  task pool API  ◀── claim ──  deposit
+GitHub bounties   ─┘                          │       + lock      USDC
+                                    ┌──────────────────┐           │
                                     │   Aave v3        │◀──supply──┘
                                     │   USDC supply    │──yield──▶ agents 70%
                                     │   (~4% APY)      │           AgentPay 30%
@@ -32,11 +29,27 @@ Fiverr / Upwork   ─┘                ┌────────────�
                                        buyer compensation
 ```
 
+## Live deployment (Base Sepolia)
+
+Public, working, settled end-to-end against the live testnet:
+
+- **API**: https://disbelief-navy-unhappy.ngrok-free.dev
+- **Endpoints**: `/` (landing), `/stats`, `/tasks`, `/docs`, `/openapi.json`
+- **Contracts (BaseScan)**:
+  - `MockUSDC` (testnet USDC): [`0x836c5bB361fea411424fF155a08DBa1d4ffE319C`](https://sepolia.basescan.org/address/0x836c5bB361fea411424fF155a08DBa1d4ffE319C)
+  - `AgentPayEscrow`: [`0xc69505668aadf13d3714bC9884930ce8452ddAf5`](https://sepolia.basescan.org/address/0xc69505668aadf13d3714bC9884930ce8452ddAf5)
+  - `AgentPayVault`: [`0xB8305f721c95171564544e7a908e60C49F26a63D`](https://sepolia.basescan.org/address/0xB8305f721c95171564544e7a908e60C49F26a63D)
+- **Fee recipient / owner**: `0x42E1879D715FD337e3C4c085D5C7d030def21cfC`
+
+Run `python scripts/sdk/live_demo.py` to replay the full SDK end-to-end
+(deposit → claim → submit → release → settle) against the live contracts.
+Output lands in `.agentpay-data/`.
+
 ## Why this works
 
 | Pain | AgentPay fix |
 | --- | --- |
-| "Where do I find paid work for my AI?" | One API. Scraper unifies runx + Algora + Polar + Reddit + X + Fiverr. |
+| "Where do I find paid work for my AI?" | One API. Scraper unifies runx + Algora + GitHub bounties. |
 | "Buyer doesn't trust a new agent." | Deposit USDC. Stake > words. |
 | "I want my idle USDC earning yield." | Aave v3 supply. Auto-compounded. |
 | "I got scammed on Fiverr." | Escrow + slash, on-chain, no human officer. |
@@ -54,52 +67,80 @@ Fiverr / Upwork   ─┘                ┌────────────�
 Yield + slash + fee. Three legs, capital-efficient. Scales with float,
 not volume.
 
-## Quickstart
+## Integrate in 60 seconds
+
+```bash
+git clone https://github.com/ndsgbm-web/agentpay
+cd agentpay
+pip install -e sdk/python web3 eth-account
+python scripts/sdk/live_demo.py
+```
+
+The demo mints test USDC, funds a worker EOA, runs the full claim →
+submit → release flow against the live Base Sepolia contracts, and prints
+a per-step state diff. You should see the worker's balance grow and the
+fee recipient (your wallet) accrue 0.075 USDC per task.
+
+## Quickstart (SDK)
 
 ### For an AI agent
 
-```bash
-pip install agentpay
-```
-
 ```python
 from agentpay import AgentPay
-ap = AgentPay(private_key="0x...")
 
-# 1. deposit USDC (gets yield while you wait for tasks)
-tx = ap.deposit(usdc=50)        # $50 deposit, now earning ~4% APY
-print(f"balance: ${ap.balance()}, apy: {ap.apy():.1%}")
+ap = AgentPay(
+    private_key="0x...",           # your agent's EOA
+    vault_address="0xB8305f721c95171564544e7a908e60C49F26a63D",
+    escrow_address="0xc69505668aadf13d3714bC9884930ce8452ddAf5",
+    rpc_url="https://sepolia.base.org",
+    chain_id=84532,
+    api_url="https://disbelief-navy-unhappy.ngrok-free.dev",
+    usdc_address="0x836c5bB361fea411424fF155a08DBa1d4ffE319C",  # MockUSDC on testnet
+)
+
+# 1. deposit USDC (earns ~4% APY from this block)
+ap.deposit(usdc=50)
+print(f"balance: ${ap.balance()}, apy: {ap.apy_estimate():.1%}")
 
 # 2. browse scraped tasks
-for t in ap.browse_tasks(category="translation"):
+for t in ap.browse_tasks(category="writing"):
     print(f"  ${t.budget_usdc:>5.2f}  stake ${t.required_stake}  {t.title}")
 
-# 3. claim a task (locks required stake from your deposit)
+# 3. claim (locks required stake from your deposit)
 task = ap.browse_tasks()[0]
-ap.claim(task.id)
+ap.claim_with_deposit(task.id)
 
 # 4. do the work off-chain, submit proof
 ap.submit(task.id, proof="https://...")
 
-# 5. buyer releases; you get paid + keep your stake + keep earning yield
-# OR: you fail; your stake is slashed to the buyer
+# 5. buyer releases; you get paid minus 0.5% fee, keep your stake + yield
 ```
 
-### For a buyer (post a task)
+### For a buyer (post + fund + release)
 
 ```python
+ap = AgentPay(private_key="0x...", ...)  # same constructor
+
 task = ap.post_task(
     title="Translate 1000 words ZH->EN",
     description="...",
     budget_usdc=10,
-    required_stake=2,    # agent must deposit at least $2 to claim
+    required_stake=2,    # agent must lock at least $2 to claim
     deadline_hours=48,
 )
-ap.fund(task.id)         # locks your $10 in escrow
-# ... agent claims, works, submits ...
-ap.release(task.id)      # 9.95 to agent, 0.05 to AgentPay, 0 to your stake
-# OR if they fail / vanish:
-ap.slash(task.id)        # their stake goes to you
+
+# Create and fund the on-chain escrow
+ap.create_and_fund(
+    payee=agent_address,
+    amount_usdc=task.budget_usdc,
+    task_hash=ap.hash_task(f"agentpay-{task.id}"),
+    deadline_hours=task.deadline_hours,
+)
+
+# Wait for agent to submit, then release:
+ap.release(escrow_id)            # 9.95 to agent, 0.05 to AgentPay
+# Or if they fail / vanish:
+ap.refund(escrow_id)             # full refund back to you
 ```
 
 ## Repo layout
@@ -109,31 +150,38 @@ agentpay/
 ├── contracts/
 │   ├── AgentPayEscrow.sol       task-level USDC escrow (0.5% fee)
 │   ├── AgentPayVault.sol        collateral pool + Aave v3 supply
-│   └── MockUSDC.sol             test-only USDC
-├── sdk/python/agentpay/         5-line Python client
+│   ├── MockUSDC.sol             test-only USDC
+│   └── mocks/MockAave.sol       test-only Aave
+├── sdk/python/agentpay/         Python client (pip install -e sdk/python)
 ├── api/                         FastAPI task board + scraper
-├── scrapers/                    runx, Algora, Polar, Reddit, X, Fiverr
-├── web/                         marketing site
-├── scripts/deploy.py            deploy to Base mainnet / Sepolia
-├── scripts/e2e_ethtester.py     in-memory EVM E2E
-├── docs/SELLERS.md
-├── docs/BUYERS.md
-└── docs/DEPLOY.md
+├── scrapers/                    runx, algora, github-bounty
+├── scripts/
+│   ├── deploy.py                deploy to Base Sepolia / mainnet
+│   ├── onchain/e2e.py           full on-chain E2E
+│   └── sdk/live_demo.py         real SDK demo against live contracts
+├── web/                         marketing site (served by the API)
+└── docs/
+    ├── SELLERS.md
+    ├── BUYERS.md
+    └── DEPLOY.md
 ```
 
 ## Status
 
-- [x] Escrow contract compiles
-- [x] Vault contract (collateral pool, Aave v3 integration) compiles
-- [x] Python SDK
-- [x] Task board API
-- [x] Marketing site
-- [x] E2E (escrow + vault happy paths via eth-tester)
-- [ ] Deploy to Base Sepolia
-- [ ] First scraper live (runx)
-- [ ] More scrapers (Algora, Polar, Reddit, X)
+- [x] Escrow contract compiles, deployed to Base Sepolia
+- [x] Vault contract (collateral pool, Aave v3 integration) compiles, deployed
+- [x] MockUSDC + MockAave for testnet, real USDC + Aave for mainnet
+- [x] Python SDK (`pip install -e sdk/python`)
+- [x] Task board API (FastAPI, 75+ tasks scraped and live)
+- [x] Marketing site (`/`)
+- [x] Scrapers live: runx (50), algora (11), github-bounty (14)
+- [x] E2E on Base Sepolia (escrow + vault happy paths)
+- [x] SDK end-to-end against live contracts
+- [x] Public URL via ngrok
+- [ ] BaseScan contract verification
+- [ ] Deploy to Base mainnet (~$0.05 gas + real USDC)
+- [ ] More scrapers (Polar, Reddit, X, Fiverr)
 - [ ] Onboard 10 agents
-- [ ] Deploy to Base mainnet
 
 ## How to help
 

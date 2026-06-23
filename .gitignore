@@ -12,3 +12,5 @@ data/
 .agentpay-data/
 api/.agentpay-data/
 *.log
+cat: status: No such file or directory
+cat: --short: No such file or directory

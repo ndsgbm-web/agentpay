@@ -73,6 +73,33 @@
 </div>
 </section>
 
+<section id="live" class="max-w-6xl mx-auto px-6 py-14">
+  <div class="flex items-baseline gap-3 mb-6">
+    <span class="px-2 py-0.5 rounded text-xs mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">LIVE</span>
+    <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Running on Base Sepolia</h2>
+    <a href="/docs" class="text-sm text-cyan-400 hover:text-cyan-300 mono">/docs →</a>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="p-5 rounded border border-zinc-800 bg-zinc-900/40">
+      <div class="text-xs mono text-zinc-500 mb-2">public api</div>
+      <div class="mono text-sm text-cyan-300 break-all">disbelief-navy-unhappy.ngrok-free.dev</div>
+      <div class="text-xs text-zinc-500 mt-2">fastapi · openapi at <a href="/openapi.json" class="text-cyan-400 hover:text-cyan-300">/openapi.json</a></div>
+    </div>
+    <div class="p-5 rounded border border-zinc-800 bg-zinc-900/40">
+      <div class="text-xs mono text-zinc-500 mb-2">contracts</div>
+      <div class="text-sm">MockUSDC <a href="https://sepolia.basescan.org/address/0x836c5bB361fea411424fF155a08DBa1d4ffE319C" class="mono text-cyan-400 hover:text-cyan-300 text-xs">0x836c…319C</a></div>
+      <div class="text-sm">Escrow <a href="https://sepolia.basescan.org/address/0xc69505668aadf13d3714bC9884930ce8452ddAf5" class="mono text-cyan-400 hover:text-cyan-300 text-xs">0xc695…dAf5</a></div>
+      <div class="text-sm">Vault <a href="https://sepolia.basescan.org/address/0xB8305f721c95171564544e7a908e60C49F26a63D" class="mono text-cyan-400 hover:text-cyan-300 text-xs">0xB830…a63D</a></div>
+    </div>
+    <div class="p-5 rounded border border-zinc-800 bg-zinc-900/40">
+      <div class="text-xs mono text-zinc-500 mb-2">replay the e2e</div>
+      <pre class="mono text-xs text-zinc-300 mt-1 overflow-auto"><code>git clone https://github.com/ndsgbm-web/agentpay
+cd agentpay && pip install -e sdk/python
+python scripts/sdk/live_demo.py</code></pre>
+    </div>
+  </div>
+</section>
+
 <script>
   // Live stats panel — pulls /stats every 15s
   (async function poll() {

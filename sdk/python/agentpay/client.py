@@ -236,6 +236,7 @@ class AgentPay:
         api_key: Optional[str] = None,
         aave_pool: Optional[str] = None,
         address: Optional[str] = None,
+        usdc_address: Optional[str] = None,
     ):
         self.chain_id = chain_id
         self.api_url = (api_url or os.environ.get("AGENTPAY_API") or self.DEFAULT_API).rstrip("/")
@@ -261,6 +262,9 @@ class AgentPay:
             if not self.w3.is_connected():
                 raise RuntimeError(f"cannot reach RPC for chain_id={chain_id}")
             self.account = Account.from_key(private_key)
+            self._next_nonce = self.w3.eth.get_transaction_count(self.account.address, "pending")
+            if usdc_address:
+                USDC_ADDRESSES[chain_id] = Web3.to_checksum_address(usdc_address)
             self._usdc = self.w3.eth.contract(address=self.usdc(), abi=USDC_ABI)
             if vault_address:
                 self.vault_address = Web3.to_checksum_address(vault_address)
@@ -304,9 +308,12 @@ class AgentPay:
     # ---------- low-level tx ----------
 
     def _send(self, fn, **overrides):
+        # Resync nonce from chain on every call; bump for the next one.
+        nonce = max(self._next_nonce, self.w3.eth.get_transaction_count(self.address, "pending"))
+        self._next_nonce = nonce + 1
         tx = fn.build_transaction({
             "from": self.address,
-            "nonce": self.w3.eth.get_transaction_count(self.address),
+            "nonce": nonce,
             "chainId": self.chain_id,
             "gas": 300_000,
             "gasPrice": self.w3.eth.gas_price,
@@ -319,7 +326,10 @@ class AgentPay:
             pass
         signed = self.account.sign_transaction(tx)
         h = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-        return self.w3.eth.wait_for_transaction_receipt(h, timeout=120)
+        r = self.w3.eth.wait_for_transaction_receipt(h, timeout=120)
+        if r.status != 1:
+            raise RuntimeError(f"tx reverted: {h.hex()}")
+        return r
 
     # ---------- vault: deposit / withdraw / claim yield ----------
 
@@ -350,13 +360,15 @@ class AgentPay:
         try:
             events = self.escrow.events.EscrowCreated().process_receipt(r)
             if events:
-                return events[0]["args"]["id"]
+                eid = events[0]["args"]["id"]
+                return eid if isinstance(eid, bytes) else bytes.fromhex(eid.hex().replace("0x", ""))
         except Exception:
             pass
-        # fallback: find the log whose address matches the escrow contract
+        # fallback: decode topic[1] from any log emitted by the escrow contract
         for log in r.logs:
-            if log["address"].lower() == self.escrow_address.lower():
-                return log["topics"][1]
+            if log["address"].lower() == self.escrow_address.lower() and len(log["topics"]) >= 2:
+                t = log["topics"][1]
+                return bytes.fromhex(t.hex().replace("0x", ""))
         raise RuntimeError("could not find EscrowCreated event in receipt")
 
     def release(self, escrow_id) -> bytes:
@@ -496,9 +508,8 @@ class AgentPay:
                                         {"caller": self.address}))
 
     def settle_task(self, task_id: str, escrow_id, tx_hash: str) -> Task:
-        return Task.from_dict(self._http("POST", f"/tasks/{task_id}/settle",
-                                        {"escrow_id": escrow_id.hex() if isinstance(escrow_id, bytes) else escrow_id,
-                                         "tx_hash": tx_hash}))
+        eid = escrow_id.hex() if isinstance(escrow_id, bytes) else escrow_id
+        return Task.from_dict(self._http("POST", f"/tasks/{task_id}/settle?escrow_id={eid}&tx_hash={tx_hash}"))
 
     def report_event(self, kind: str, escrow_id, tx_hash: str, **kw) -> dict:
         body = {
